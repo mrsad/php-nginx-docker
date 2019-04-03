@@ -10,7 +10,8 @@ RUN addgroup -S -g 82 www-data && \
 # Install packages
 #RUN echo 'http://dl-cdn.alpinelinux.org/alpine/edge/community' >> /etc/apk/repositories && \
 #    echo '@edgemain http://dl-cdn.alpinelinux.org/alpine/edge/main' >> /etc/apk/repositories
-RUN apk add --update \
+RUN apk update && \
+    apk add --update \
         bash \
         libressl \
         ca-certificates \
@@ -102,7 +103,7 @@ RUN apk add --update \
         supervisor 
 
 # Iconv fix: https://github.com/docker-library/php/issues/240#issuecomment-305038173
-RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing gnu-libiconv
+#RUN apk add --no-cache --repository http://dl-3.alpinelinux.org/alpine/edge/testing gnu-libiconv
 ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
 
 # install node-8 && yarn
@@ -230,6 +231,7 @@ RUN mkdir -p /var/www/html && \
 WORKDIR /var/www/html
 EXPOSE 9000
 EXPOSE 80 443
+
 # Init www-data user
 USER www-data
 
@@ -241,7 +243,38 @@ USER root
 RUN addgroup -g 1000 developer \
     && adduser -u 1000 -G developer -s /bin/sh -h /home/developer -D developer
 
-#RUN mkdir -p /.composer && chmod 1777 /.composer && chmod 777 /
+
+ENV DRUSH_LAUNCHER_VER="0.6.0" \
+    DRUPAL_CONSOLE_LAUNCHER_VER="1.8.0" \
+    DRUSH_LAUNCHER_FALLBACK="/home/developer/.composer/vendor/bin/drush"
+
+RUN apk add --no-cache sudo
+RUN set -ex; \
+    sudo -u developer composer global require drush/drush:^8.0; \
+    \
+    # Drush launcher
+    drush_launcher_url="https://github.com/drush-ops/drush-launcher/releases/download/${DRUSH_LAUNCHER_VER}/drush.phar"; \
+    wget -O drush.phar "${drush_launcher_url}"; \
+    chmod +x drush.phar; \
+    mv drush.phar /usr/local/bin/drush; \
+    \
+    # Drush extensions
+    sudo -u developer mkdir -p /home/developer/.drush; \
+    drush_patchfile_url="https://bitbucket.org/davereid/drush-patchfile.git"; \
+    sudo -u developer git clone "${drush_patchfile_url}" /home/developer/.drush/drush-patchfile; \
+    drush_rr_url="https://ftp.drupal.org/files/projects/registry_rebuild-7.x-2.5.tar.gz"; \
+    wget -qO- "${drush_rr_url}" | sudo -u developer tar zx -C /home/developer/.drush; \
+    \
+    # Drupal console
+    console_url="https://github.com/hechoendrupal/drupal-console-launcher/releases/download/${DRUPAL_CONSOLE_LAUNCHER_VER}/drupal.phar"; \
+    curl "${console_url}" -L -o drupal.phar; \
+    mv drupal.phar /usr/local/bin/drupal; \
+    chmod +x /usr/local/bin/drupal; \
+    \
+    # Clean up
+    sudo -u developer composer clear-cache
+    #sudo -u developer drush cc drush
+
 
 COPY docker-entrypoint.sh /usr/local/bin/
-CMD docker-entrypoint.sh
+CMD /usr/local/bin/docker-entrypoint.sh
